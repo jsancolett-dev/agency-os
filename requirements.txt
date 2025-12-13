@@ -1,5 +1,7 @@
+# requirements.txt
 streamlit
 psycopg2-binary
 sqlalchemy
 pandas
 plotly
+Flask
