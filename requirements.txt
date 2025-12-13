@@ -5,3 +5,5 @@ sqlalchemy
 pandas
 plotly
 Flask
+requests
+werkzeug
