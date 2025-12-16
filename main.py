@@ -80,7 +80,7 @@ async def streamlit_proxy(path):
             headers=headers,
             content=request.get_data(),
             params=request.args,
-            allow_redirects=False
+            follow_redirects=False
         )
         
         # Cria a resposta para o navegador do usuário
