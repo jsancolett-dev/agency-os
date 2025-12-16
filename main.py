@@ -1,9 +1,10 @@
-# main.py (Versão 3.0 - Com Proxy Reverso Robusto para WebSockets)
+# main.py (Versão 4.0 - Final com correção do Event Loop)
 
 import os
 import uuid
 import subprocess
-import httpx # Novo import para o proxy
+import httpx
+import asyncio  # <--- 1. IMPORTAÇÃO ADICIONADA
 from flask import Flask, request, jsonify, Response
 from sqlalchemy import create_engine, text
 
@@ -15,10 +16,8 @@ if db_url and db_url.startswith("postgres://"):
 engine = create_engine(db_url) if db_url else None
 
 # --- Endpoint do Webhook (Nossa "Doca de Carga") ---
-# (Esta parte não mudou)
 @app.route('/webhook/umbler', methods=['POST'])
 def umbler_webhook():
-    # ... (código do webhook omitido para brevidade, ele continua o mesmo)
     data = request.get_json()
     if not data: return jsonify({"status": "error", "message": "Nenhum dado recebido"}), 400
     numero_cliente = data.get('sender', {}).get('phone')
@@ -48,52 +47,47 @@ def umbler_webhook():
     return jsonify({"status": "success", "message": "Atendimento criado"}), 200
 
 
-# --- NOVA SEÇÃO: Proxy Reverso Robusto para Streamlit (com suporte a WebSocket) ---
+# --- SEÇÃO DO PROXY - COMPLETAMENTE SUBSTITUÍDA ---
 
 STREAMLIT_URL = "http://127.0.0.1:8501"
 client = httpx.AsyncClient(base_url=STREAMLIT_URL )
 
+# 2. A FUNÇÃO AGORA É SÍNCRONA (SEM 'async' NA FRENTE DE 'def')
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>', methods=['GET', 'POST', 'DELETE', 'PUT'])
-async def streamlit_proxy(path):
+def streamlit_proxy(path):
     """
-    Este novo proxy usa httpx e suporta WebSockets,
-    o que é essencial para o Streamlit funcionar corretamente.
+    Este proxy síncrono envolve a chamada assíncrona com asyncio.run(),
+    resolvendo o problema do 'event loop is closed'.
     """
-    # Verifica se a requisição é para um WebSocket (o "dialeto" do Streamlit )
-    if 'Upgrade' in request.headers and request.headers['Upgrade'].lower() == 'websocket':
-        # Se for, não podemos usar o proxy simples. Retornamos um erro indicando
-        # que a configuração do servidor web precisa lidar com isso.
-        # No Render, isso geralmente funciona por padrão se a biblioteca estiver correta.
-        # Esta é uma salvaguarda.
-        return "WebSocket proxying not supported by this simple proxy.", 501
+    # 3. CRIAMOS UMA FUNÇÃO INTERNA ASSÍNCRONA
+    async def do_request():
+        try:
+            # O código do proxy agora vive aqui dentro
+            url = request.url.replace(request.host_url, STREAMLIT_URL + '/')
+            headers = {key: value for key, value in request.headers if key.lower() != 'host'}
 
-    # Para requisições HTTP normais, repassamos com httpx
-    url = f"{STREAMLIT_URL}/{path}"
-    headers = {key: value for key, value in request.headers if key.lower( ) != 'host'}
-    
-    try:
-        # Usamos o httpx para fazer a requisição de forma assíncrona
-        response = await client.request(
-            method=request.method,
-            url=request.url.replace(request.host_url, STREAMLIT_URL + '/' ),
-            headers=headers,
-            content=request.get_data(),
-            params=request.args,
-            follow_redirects=False
-        )
-        
-        # Cria a resposta para o navegador do usuário
-        return Response(response.content, response.status_code, response.headers.items())
+            response = await client.request(
+                method=request.method,
+                url=url,
+                headers=headers,
+                content=request.get_data(),
+                params=request.args,
+                follow_redirects=False # Parâmetro que corrigimos anteriormente
+            )
+            return Response(response.content, response.status_code, response.headers.items())
 
-    except httpx.ConnectError:
-        return "A aplicação está iniciando, por favor aguarde e atualize a página em alguns segundos.", 503
-    except Exception as e:
-        return f"Erro no proxy: {e}", 500
+        except httpx.ConnectError:
+            return "A aplicação está iniciando, por favor aguarde e atualize a página em alguns segundos.", 503
+        except Exception as e:
+            return f"Erro no proxy: {e}", 500
+
+    # 4. USAMOS asyncio.run( ) PARA EXECUTAR A FUNÇÃO INTERNA
+    return asyncio.run(do_request())
 
 
 # --- Comando para Iniciar a Aplicação ---
-def run( ):
+def run():
     # Inicia o Streamlit como um processo separado
     streamlit_command = "streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0"
     subprocess.Popen(streamlit_command, shell=True)
