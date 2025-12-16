@@ -4,7 +4,7 @@ psycopg2-binary
 sqlalchemy
 pandas
 plotly
-Flask
+Flask[async]
 httpx
 starlette
 werkzeug
