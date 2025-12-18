@@ -4,8 +4,3 @@ psycopg2-binary
 sqlalchemy
 pandas
 plotly
-Flask[async]
-httpx
-starlette
-werkzeug
-gunicorn  # <--- O SERVIDOR DE PRODUÇÃO
