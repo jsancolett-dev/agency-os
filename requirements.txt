@@ -8,3 +8,4 @@ Flask[async]
 httpx
 starlette
 werkzeug
+gunicorn  # <--- O SERVIDOR DE PRODUÇÃO

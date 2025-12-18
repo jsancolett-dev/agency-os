@@ -1,23 +1,25 @@
-# main.py (Versão 4.0 - Final com correção do Event Loop)
+# main.py (Versão 5.0 - Pronta para Gunicorn)
 
 import os
 import uuid
-import subprocess
 import httpx
-import asyncio  # <--- 1. IMPORTAÇÃO ADICIONADA
+import asyncio
 from flask import Flask, request, jsonify, Response
 from sqlalchemy import create_engine, text
 
-# --- Configuração Inicial ---
+# A aplicação Flask é definida. Gunicorn vai encontrá-la.
 app = Flask(__name__ )
+
+# --- Configuração do Banco de Dados ---
 db_url = os.environ.get("DATABASE_URL")
 if db_url and db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 engine = create_engine(db_url) if db_url else None
 
-# --- Endpoint do Webhook (Nossa "Doca de Carga") ---
+# --- Endpoint do Webhook (Sem alterações) ---
 @app.route('/webhook/umbler', methods=['POST'])
 def umbler_webhook():
+    # ... (código do webhook omitido, continua o mesmo)
     data = request.get_json()
     if not data: return jsonify({"status": "error", "message": "Nenhum dado recebido"}), 400
     numero_cliente = data.get('sender', {}).get('phone')
@@ -46,55 +48,30 @@ def umbler_webhook():
         return jsonify({"status": "error", "message": "Erro interno do servidor"}), 500
     return jsonify({"status": "success", "message": "Atendimento criado"}), 200
 
-
-# --- SEÇÃO DO PROXY - COMPLETAMENTE SUBSTITUÍDA ---
-
+# --- Proxy Reverso (Sem alterações na lógica, mas agora será executado pelo Gunicorn) ---
 STREAMLIT_URL = "http://127.0.0.1:8501"
 client = httpx.AsyncClient(base_url=STREAMLIT_URL )
 
-# 2. A FUNÇÃO AGORA É SÍNCRONA (SEM 'async' NA FRENTE DE 'def')
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>', methods=['GET', 'POST', 'DELETE', 'PUT'])
 def streamlit_proxy(path):
-    """
-    Este proxy síncrono envolve a chamada assíncrona com asyncio.run(),
-    resolvendo o problema do 'event loop is closed'.
-    """
-    # 3. CRIAMOS UMA FUNÇÃO INTERNA ASSÍNCRONA
     async def do_request():
         try:
-            # O código do proxy agora vive aqui dentro
             url = request.url.replace(request.host_url, STREAMLIT_URL + '/')
             headers = {key: value for key, value in request.headers if key.lower() != 'host'}
-
             response = await client.request(
                 method=request.method,
                 url=url,
                 headers=headers,
                 content=request.get_data(),
                 params=request.args,
-                follow_redirects=False # Parâmetro que corrigimos anteriormente
+                follow_redirects=False
             )
             return Response(response.content, response.status_code, response.headers.items())
-
         except httpx.ConnectError:
-            return "A aplicação está iniciando, por favor aguarde e atualize a página em alguns segundos.", 503
+            return "A aplicação Streamlit ainda está iniciando. Por favor, aguarde e atualize a página.", 503
         except Exception as e:
             return f"Erro no proxy: {e}", 500
+    return asyncio.run(do_request( ))
 
-    # 4. USAMOS asyncio.run( ) PARA EXECUTAR A FUNÇÃO INTERNA
-    return asyncio.run(do_request())
-
-
-# --- Comando para Iniciar a Aplicação ---
-def run():
-    # Inicia o Streamlit como um processo separado
-    streamlit_command = "streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0"
-    subprocess.Popen(streamlit_command, shell=True)
-
-    # Inicia o Flask na porta que o Render nos fornece
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-if __name__ == '__main__':
-    run()
+# REMOVEMOS A FUNÇÃO run() E O if __name__ == '__main__'
